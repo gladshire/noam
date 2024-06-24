@@ -13,9 +13,8 @@ import string
 
 __DEBUG__ = False
 
-
 EMBEDDING_DIM = 1
-HIDDEN_DIM = 64
+HIDDEN_DIM = 256
 NUM_LAYERS = 4
 BATCH_SIZE = 32
 DEVICE = "cpu"
@@ -24,6 +23,19 @@ NUM_WORKERS = 4
 LEARNING_RATE = 0.001
 
 SAMPLE_RATE = 10
+
+def plotLists(x, y, color, xaxis, yaxis, title, filename):
+    plt.plot(x, y, color=color)
+    plt.title(title)
+    plt.xlabel(xaxis)
+    plt.ylabel(yaxis)
+    plt.grid()
+
+    plt.savefig(filename)
+    plt.clf()
+    plt.cla()
+
+
 
 # Define PyTorch Dataset wrapper for CSV
 class EssaysDataset(Dataset):
@@ -34,11 +46,6 @@ class EssaysDataset(Dataset):
         # Drop empty rows
         drop_rows = self.data[self.data['text']==''].index
         self.data.drop(drop_rows, inplace=True)
-
-        # Define subset of data for debugging
-        if __DEBUG__:
-            self.data.sample(frac=1)
-            self.data = self.data[:2500]
 
         # Define tokenizer and counter
         self.tokenizer = get_tokenizer("basic_english")
@@ -86,64 +93,89 @@ class noamModel(nn.Module):
     def __init__(self, vocab_size, embedding_dim, hidden_dim, num_layers = 1):
         super().__init__()
 
-        '''
-        torch.Size([32, 1502])
-        torch.Size([32, 1502, 1])
-        torch.Size([32, 1, 1502])
-        torch.Size([32, 16, 165])
-        torch.Size([32, 165, 16])
-        torch.Size([32, 165, 128])
-        torch.Size([32, 128, 165])
-        torch.Size([32, 21120])
-        '''
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
 
         self.rnn1 = nn.Sequential(
                         nn.LSTM(input_size=16, hidden_size=hidden_dim,
-                                num_layers=2, bidirectional=True, batch_first=True)
+                                num_layers=1, bidirectional=True, batch_first=True)
         )
 
         self.cnn1 = nn.Sequential(
-                        nn.Conv1d(in_channels=1, out_channels=4, kernel_size=8),
-                        nn.MaxPool1d(3),
+                        nn.Conv1d(in_channels=1, out_channels=4, kernel_size=12),
+                        nn.MaxPool1d(8),
+                        nn.BatchNorm1d(4),
                         nn.ReLU(),
 
-                        nn.Conv1d(in_channels=4, out_channels=16, kernel_size=3),
-                        nn.MaxPool1d(3),
-                        nn.ReLU()
+                        nn.Conv1d(in_channels=4, out_channels=16, kernel_size=4),
+                        nn.MaxPool1d(8),
+                        nn.BatchNorm1d(16),
+                        nn.ReLU(),
         )
 
-        
+        self.tns = nn.TransformerEncoder(
+                        nn.TransformerEncoderLayer(d_model=hidden_dim*2, nhead=2,
+                                                   dim_feedforward=128, batch_first=True),
+                        num_layers=3
+        )
 
         self.fc = nn.Sequential(
-                        nn.Linear(25088, 512),
+                        nn.Linear(13824, 256),
                         nn.ReLU(),
 
-                        nn.Linear(512, 128),
+                        nn.Linear(256, 64),
                         nn.ReLU(),
 
-                        nn.Linear(128, 32),
+                        nn.Linear(64, 8),
                         nn.ReLU(),
 
-                        nn.Linear(32, 1),
+                        nn.Linear(8, 1),
         )
 
 
     def forward(self, x, lengths):
-
+        if __DEBUG__:
+            print("Input tensor shape:")
+            print(x.shape)
+        # Apply embedding to tokenized text
         y = self.embedding(x)
+        if __DEBUG__:
+            print("Tensor shape after embedding:")
+            print(y.shape)
 
         y = y.permute(0, 2, 1)
+        if __DEBUG__:
+            print("Tensor shape after permuting:")
+            print(y.shape)
 
         y = self.cnn1(y)
+        if __DEBUG__:
+            print("Tensor shape after convolution:")
+            print(y.shape)
 
         y = y.permute(0, 2, 1)
+        if __DEBUG__:
+            print("Tensor shape after permuting:")
+            print(y.shape)
 
         y, _ = self.rnn1(y)
+        if __DEBUG__:
+            print("Tensor shape after LSTM:")
+            print(y.shape)
+ 
+        #y = self.tns(y)
+        #if __DEBUG__:
+        #    print("Tensor shape after Transformer:")
+        #    print(y.shape)
 
         y = y.permute(0, 2, 1)
+        if __DEBUG__:
+            print("Tensor shape after permuting:")
+            print(y.shape)
 
         y = y.reshape(y.size()[0], -1)
+        if __DEBUG__:
+            print("Tensor shape after squeezing:")
+            print(y.shape)
 
         output = self.fc(y)
         return torch.sigmoid(output)
@@ -174,6 +206,8 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 ct = []
 train_loss_hist = []
+train_acc_hist = []
+test_acc_hist = []
 
 batch_num = 0
 # Training loop
@@ -231,7 +265,10 @@ for epoch in range(NUM_EPOCHS):
             batch_num += SAMPLE_RATE
             ct.append(batch_num)
             train_loss_hist.append(batch_loss)
+            train_acc_hist.append(batch_acc)
 
+    plotLists(ct, train_loss_hist, 'blue', "Batches", "Loss", "BCE Loss", f"train_{epoch+1}.png")
+    plotLists(ct, train_acc_hist, 'orange', "Batches", "% Correct", "Accuracy", f"train_acc_{epoch+1}.png")
 
     model.eval()
     total_loss_test = 0
@@ -262,28 +299,26 @@ for epoch in range(NUM_EPOCHS):
 
     test_acc = total_correct_test / total_samples_test
     acc = total_correct_test / total_samples_test
+    
+    test_acc_hist.append(test_acc)
+    if epoch > 0:
+        plotLists(range(epoch), test_acc_hist, 'red', "Epochs", "% Correct", "Average Test Accuracy",
+                  f"test_{epoch+1}.png")
 
     print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] Summary:")
     print(f"  Average training loss: {total_loss / len(train_loader):.4f}")
     print(f"  Average testing loss: {total_loss_test / len(test_loader):.4f}")
     print()
     print(f"  Average Training Accuracy: {acc:.4f}")
-    print(f"    E1: {total_false_pos / len(train_loader):.4f}")
-    print(f"    E2: {total_false_neg / len(train_loader):.4f}")
+    print(f"    E1: {total_false_pos / total_samples:.4f}")
+    print(f"    E2: {total_false_neg / total_samples:.4f}")
     print()
     print(f"  Test Accuracy:  {test_acc:.4f}")
-    print(f"    E1: {total_false_pos_test / len(test_loader):.4f}")
-    print(f"    E2: {total_false_neg_test / len(test_loader):.4f}")
+    print(f"    E1: {total_false_pos_test / total_samples_test:.4f}")
+    print(f"    E2: {total_false_neg_test / total_samples_test:.4f}")
     print()
 
-    plt.plot(ct, train_loss_hist, color='blue')
-    plt.title("BCE Loss")
-    plt.xlabel("Batches")
-    plt.grid()
 
-    plt.savefig(f"train_{epoch+1}.png")
-    plt.clf()
-    plt.cla()
     if test_acc > 0.8:
         torch.save(model.state_dict(), "model.pt")
 
