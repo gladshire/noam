@@ -18,7 +18,7 @@ HIDDEN_DIM = 256
 NUM_LAYERS = 4
 BATCH_SIZE = 32
 DEVICE = "cpu"
-NUM_EPOCHS = 50
+NUM_EPOCHS = 25
 NUM_WORKERS = 4
 LEARNING_RATE = 0.001
 
@@ -190,8 +190,8 @@ test_size = len(dataset) - train_size
 train_dataset, test_dataset = torch.utils.data.random_split(dataset,
                                                             [train_size, test_size])
 
-train_loader = DataLoader(train_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = False)
-test_loader = DataLoader(test_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = False)
+train_loader = DataLoader(train_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = True)
+test_loader = DataLoader(test_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = True)
 
 
 # Initialize model
@@ -302,7 +302,7 @@ for epoch in range(NUM_EPOCHS):
     
     test_acc_hist.append(test_acc)
     if epoch > 0:
-        plotLists(range(epoch), test_acc_hist, 'red', "Epochs", "% Correct", "Average Test Accuracy",
+        plotLists(range(epoch+1), test_acc_hist, 'red', "Epochs", "% Correct", "Average Test Accuracy",
                   f"test_{epoch+1}.png")
 
     print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] Summary:")
