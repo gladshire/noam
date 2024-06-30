@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchtext.data.utils import get_tokenizer
 from collections import Counter, OrderedDict
 from torchtext.vocab import Vocab, build_vocab_from_iterator
@@ -17,7 +17,7 @@ __DEBUG__ = False
 EMBEDDING_DIM = 1
 HIDDEN_DIM = 256
 NUM_LAYERS = 4
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 DEVICE = "cpu"
 NUM_EPOCHS = 25
 NUM_WORKERS = 4
@@ -180,11 +180,11 @@ class noamModel(nn.Module):
 # Initialize dataset
 print("Reading/preparing training and testing data ...")
 
-train_dataset = EssaysDataset('Training_Essay_Data.csv', max_length = 1780)
-test_dataset = EssaysDataset('Test_Essay_Data.csv', max_length = 1780)
-
-train_vocab_size = len(train_dataset.vocab)
-test_vocab_size = len(test_dataset.vocab)
+dataset = EssayDataset('Training_Essay_Data.csv')
+vocab_size = len(train_dataset.vocab)
+train_size = int(0.8 * len(dataset))
+test_size = len(dataset) - train_size
+train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
 train_loader = DataLoader(train_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = True)
 test_loader = DataLoader(test_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = True)
@@ -198,8 +198,8 @@ model.to(DEVICE)
 
 # Define loss function, optimizer
 criterion = nn.BCELoss()
-#optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
+optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+#optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
 
 
 ct = []
