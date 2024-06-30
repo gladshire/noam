@@ -143,7 +143,7 @@ class noamModel(nn.Module):
 
         # Fully connected layers to get an output
         self.fc = nn.Sequential(
-                        nn.Linear(13824, 256),
+                        nn.Linear(13824, 256), # First parameter is a magic number. Change to fit. Sorry.
                         nn.ReLU(),
 
                         nn.Linear(256, 64),
@@ -180,8 +180,8 @@ class noamModel(nn.Module):
 # Initialize dataset
 print("Reading/preparing training and testing data ...")
 
-dataset = EssayDataset('Training_Essay_Data.csv')
-vocab_size = len(train_dataset.vocab)
+dataset = EssaysDataset('Training_Essay_Data.csv')
+vocab_size = len(dataset.vocab)
 train_size = int(0.8 * len(dataset))
 test_size = len(dataset) - train_size
 train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
@@ -193,7 +193,7 @@ test_loader = DataLoader(test_dataset, batch_size = BATCH_SIZE, num_workers = NU
 
 # Initialize model
 print("Instantiating model ...")
-model = noamModel(train_vocab_size, embedding_dim = EMBEDDING_DIM, hidden_dim = HIDDEN_DIM, num_layers = NUM_LAYERS)
+model = noamModel(vocab_size, embedding_dim = EMBEDDING_DIM, hidden_dim = HIDDEN_DIM, num_layers = NUM_LAYERS)
 model.to(DEVICE)
 
 # Define loss function, optimizer
