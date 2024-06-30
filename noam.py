@@ -21,9 +21,11 @@ DEVICE = "cpu"
 NUM_EPOCHS = 25
 NUM_WORKERS = 4
 LEARNING_RATE = 0.001
+MOMENTUM = 0.0
 
 SAMPLE_RATE = 10
 
+# Utility function for plotting two series
 def plotLists(x, y, color, xaxis, yaxis, title, filename):
     plt.plot(x, y, color=color)
     plt.title(title)
@@ -70,11 +72,13 @@ class EssaysDataset(Dataset):
         label = torch.tensor(self.data.iloc[idx]['generated'], dtype = torch.float32)
         return text_sample_vector, seq_length, label
 
+    # Preprocessing function for removing upper case, punctuation from essays
     def preprocess(self, text):
         text_lower = text.lower()
         text_nopunc = text_lower.translate(str.maketrans('', '', string.punctuation))
         return text_nopunc
 
+    # Tokenizer/vectorizer function for essay data, reduces dimensionality
     def vectorize(self, text_sample):
         tokens = self.tokenizer(text_sample)
         if not tokens:
@@ -95,29 +99,37 @@ class noamModel(nn.Module):
 
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
 
+        # Recurrent LSTM layer for capturing global sequential patterns
         self.rnn1 = nn.Sequential(
                         nn.LSTM(input_size=16, hidden_size=hidden_dim,
-                                num_layers=1, bidirectional=True, batch_first=True)
+                                num_layers=2, bidirectional=True, batch_first=True)
         )
 
+	# Define convolutional downsampling step
         self.cnn1 = nn.Sequential(
+                        # First convolutional layer, kernel size of 12 for extracting
+                        # word-sentence level features (in theory)
                         nn.Conv1d(in_channels=1, out_channels=4, kernel_size=12),
                         nn.MaxPool1d(8),
                         nn.BatchNorm1d(4),
                         nn.ReLU(),
 
+			# Second convolutional layer, kernel size of 4 for extracting
+                        # paragraph-level features from sentence-level ones (again, in theory)
                         nn.Conv1d(in_channels=4, out_channels=16, kernel_size=4),
                         nn.MaxPool1d(8),
                         nn.BatchNorm1d(16),
                         nn.ReLU(),
         )
 
+        # Transformer layer for self-attention
         self.tns = nn.TransformerEncoder(
                         nn.TransformerEncoderLayer(d_model=hidden_dim*2, nhead=2,
                                                    dim_feedforward=128, batch_first=True),
-                        num_layers=3
+                        num_layers=6
         )
 
+        # Fully connected layers to get an output
         self.fc = nn.Sequential(
                         nn.Linear(13824, 256),
                         nn.ReLU(),
@@ -162,10 +174,10 @@ class noamModel(nn.Module):
             print("Tensor shape after LSTM:")
             print(y.shape)
  
-        #y = self.tns(y)
-        #if __DEBUG__:
-        #    print("Tensor shape after Transformer:")
-        #    print(y.shape)
+        y = self.tns(y)
+        if __DEBUG__:
+            print("Tensor shape after Transformer:")
+            print(y.shape)
 
         y = y.permute(0, 2, 1)
         if __DEBUG__:
@@ -202,6 +214,7 @@ model.to(DEVICE)
 # Define loss function, optimizer
 criterion = nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+# optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
 
 
 ct = []
