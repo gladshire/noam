@@ -297,7 +297,7 @@ for epoch in range(NUM_EPOCHS):
             total_false_neg_test += false_neg_test
 
     test_acc = total_correct_test / total_samples_test
-    acc = total_correct / total_samples_test
+    acc = total_correct / total_samples
     
     test_acc_hist.append(test_acc)
     if epoch > 0:
