@@ -13,17 +13,18 @@ import string
 
 __DEBUG__ = False
 
+# Global settings/hyperparameters for NLP model
 EMBEDDING_DIM = 1
 HIDDEN_DIM = 256
 NUM_LAYERS = 4
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 DEVICE = "cpu"
 NUM_EPOCHS = 25
 NUM_WORKERS = 4
 LEARNING_RATE = 0.001
-MOMENTUM = 0.0
+MOMENTUM = 0.9
 
-SAMPLE_RATE = 10
+SAMPLE_RATE = 10 # For loss plotting, number of batches between points
 
 # Utility function for plotting two series
 def plotLists(x, y, color, xaxis, yaxis, title, filename):
@@ -39,9 +40,16 @@ def plotLists(x, y, color, xaxis, yaxis, title, filename):
 
 
 
-# Define PyTorch Dataset wrapper for CSV
+# Define PyTorch Dataset wrapper for CSV of Essay data, formatted:
+#
+#   Essay	Generated
+#   essay1...   0
+#   essay2...   1
+#   essay3...   1
+#   ...   
 class EssaysDataset(Dataset):
-    def __init__(self, csv_path, min_freq = 1, reserved_tokens = []):
+    def __init__(self, csv_path, min_freq = 1, reserved_tokens = [],
+                 max_length = 0):
         # Read CSV into a table
         self.data = pd.read_csv(csv_path)
 	
@@ -60,7 +68,11 @@ class EssaysDataset(Dataset):
         
         # Build vocabulary from tokens
         self.vocab = build_vocab_from_iterator([self.counter])
-        self.max_seq_length = max(len(self.tokenizer(text_sample)) for text_sample in self.data['text'])
+        if max_length == 0:
+            self.max_seq_length = max(len(self.tokenizer(text_sample)) for text_sample in self.data['text'])
+        else:
+            self.max_seq_length = max_length
+        #print(self.max_seq_length)
         
     def __len__(self):
         return len(self.data)
@@ -122,7 +134,7 @@ class noamModel(nn.Module):
                         nn.ReLU(),
         )
 
-        # Transformer layer for self-attention
+        # Transformer layer for self-attention. Not currently in-use
         self.tns = nn.TransformerEncoder(
                         nn.TransformerEncoderLayer(d_model=hidden_dim*2, nhead=2,
                                                    dim_feedforward=128, batch_first=True),
@@ -145,76 +157,49 @@ class noamModel(nn.Module):
 
 
     def forward(self, x, lengths):
-        if __DEBUG__:
-            print("Input tensor shape:")
-            print(x.shape)
         # Apply embedding to tokenized text
         y = self.embedding(x)
-        if __DEBUG__:
-            print("Tensor shape after embedding:")
-            print(y.shape)
 
         y = y.permute(0, 2, 1)
-        if __DEBUG__:
-            print("Tensor shape after permuting:")
-            print(y.shape)
 
         y = self.cnn1(y)
-        if __DEBUG__:
-            print("Tensor shape after convolution:")
-            print(y.shape)
 
         y = y.permute(0, 2, 1)
-        if __DEBUG__:
-            print("Tensor shape after permuting:")
-            print(y.shape)
 
         y, _ = self.rnn1(y)
-        if __DEBUG__:
-            print("Tensor shape after LSTM:")
-            print(y.shape)
  
-        y = self.tns(y)
-        if __DEBUG__:
-            print("Tensor shape after Transformer:")
-            print(y.shape)
+        #y = self.tns(y)
 
         y = y.permute(0, 2, 1)
-        if __DEBUG__:
-            print("Tensor shape after permuting:")
-            print(y.shape)
 
         y = y.reshape(y.size()[0], -1)
-        if __DEBUG__:
-            print("Tensor shape after squeezing:")
-            print(y.shape)
 
         output = self.fc(y)
         return torch.sigmoid(output)
 
 # Initialize dataset
-print("Reading/preparing training data ...")
-dataset = EssaysDataset('Training_Essay_Data.csv')
+print("Reading/preparing training and testing data ...")
 
-vocab_size = len(dataset.vocab)
-train_size = int(0.8 * len(dataset))
-test_size = len(dataset) - train_size
-train_dataset, test_dataset = torch.utils.data.random_split(dataset,
-                                                            [train_size, test_size])
+train_dataset = EssaysDataset('Training_Essay_Data.csv', max_length = 1780)
+test_dataset = EssaysDataset('Test_Essay_Data.csv', max_length = 1780)
+
+train_vocab_size = len(train_dataset.vocab)
+test_vocab_size = len(test_dataset.vocab)
 
 train_loader = DataLoader(train_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = True)
 test_loader = DataLoader(test_dataset, batch_size = BATCH_SIZE, num_workers = NUM_WORKERS, shuffle = True)
 
 
+
 # Initialize model
 print("Instantiating model ...")
-model = noamModel(vocab_size, embedding_dim = EMBEDDING_DIM, hidden_dim = HIDDEN_DIM, num_layers = NUM_LAYERS)
+model = noamModel(train_vocab_size, embedding_dim = EMBEDDING_DIM, hidden_dim = HIDDEN_DIM, num_layers = NUM_LAYERS)
 model.to(DEVICE)
 
 # Define loss function, optimizer
 criterion = nn.BCELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-# optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
+#optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM)
 
 
 ct = []
@@ -257,7 +242,7 @@ for epoch in range(NUM_EPOCHS):
         # Update total loss
         total_loss += loss.item()
 
-        # Obtain batch accuracy
+        # Obtain batch accuracy, type-1 and type-2 error rates
         pred = torch.round(outputs).squeeze()
         correct = (pred == labels).sum().item()
         false_pos = ((pred == 1) & (labels == 0)).sum().item()
@@ -280,6 +265,7 @@ for epoch in range(NUM_EPOCHS):
             train_loss_hist.append(batch_loss)
             train_acc_hist.append(batch_acc)
 
+    # Plot training loss and accuracy
     plotLists(ct, train_loss_hist, 'blue', "Batches", "Loss", "BCE Loss", f"train_{epoch+1}.png")
     plotLists(ct, train_acc_hist, 'orange', "Batches", "% Correct", "Accuracy", f"train_acc_{epoch+1}.png")
 
@@ -319,8 +305,8 @@ for epoch in range(NUM_EPOCHS):
                   f"test_{epoch+1}.png")
 
     print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] Summary:")
-    print(f"  Average training loss: {total_loss / len(train_loader):.4f}")
-    print(f"  Average testing loss: {total_loss_test / len(test_loader):.4f}")
+    print(f"  Average training loss: {total_loss / total_samples:.4f}")
+    print(f"  Average testing loss: {total_loss_test / total_samples_test:.4f}")
     print()
     print(f"  Average Training Accuracy: {acc:.4f}")
     print(f"    E1: {total_false_pos / total_samples:.4f}")
